@@ -1,5 +1,5 @@
 {
-  "name": "my-turborepo",
+  "name": "ai-tourism",
   "private": true,
   "scripts": {
     "build": "turbo run build",
