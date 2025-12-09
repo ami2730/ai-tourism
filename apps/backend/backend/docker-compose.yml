@@ -1,0 +1,72 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: adama_tourism_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-adama_tourism}
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - adama_network
+
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: adama_tourism_backend
+    restart: always
+    depends_on:
+      - db
+      - ml
+    env_file:
+      - ../backend/.env
+    environment:
+      # Fallbacks if not provided in .env
+      PORT: ${PORT:-3000}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/adama_tourism?schema=public}
+      ML_SERVICE_URL: ${ML_SERVICE_URL:-http://ml:8000}
+      NODE_ENV: ${NODE_ENV:-development}
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source code for hot-reload (development)
+      - ../backend/src:/app/src
+      - ../backend/uploads:/app/uploads
+      # Exclude node_modules from mount to use container's installed packages
+      - /app/node_modules
+    networks:
+      - adama_network
+
+  ml:
+    build:
+      context: ../ml
+      dockerfile: Dockerfile
+    container_name: adama_tourism_ml
+    restart: always
+    env_file:
+      - ../ml/.env
+    environment:
+      # Backend URL inside the Docker network
+      EXPRESS_ML_URL: ${EXPRESS_ML_URL:-http://backend:3000}
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount source code for hot-reload (development)
+      - ../ml/app:/app/app
+      # Exclude Python cache and installed packages
+      - /app/__pycache__
+    networks:
+      - adama_network
+
+volumes:
+  postgres_data:
+
+networks:
+  adama_network:
+    driver: bridge
+

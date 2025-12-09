@@ -1,0 +1,486 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "library"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------
+// Enums
+// ------------------------------------------------------
+
+enum Role {
+  ADMIN
+  TOURIST
+  RESIDENT
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  HIDDEN
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+enum PaymentProvider {
+  CHAPA
+  STRIPE
+  MANUAL
+}
+
+enum PaymentStatus {
+  PENDING
+  INITIATED
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum TicketStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  USED
+  EXPIRED
+}
+
+enum InteractionType {
+  VIEW
+  CLICK
+  SAVE
+  BOOK
+  REVIEW
+  SHARE
+}
+
+enum RecommendationItemType {
+  PLACE
+  EVENT
+  RESTAURANT
+  OTHER
+}
+
+enum ChatMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum PostStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ------------------------------------------------------
+// Core Models
+// ------------------------------------------------------
+
+model User {
+  id              String           @id @default(uuid())
+  email           String           @unique
+  password        String
+  phoneNumber     String?           @unique
+  role            Role             @default(TOURIST)
+  profile         Profile?
+  reviews         Review[]
+  bookings        Booking[]
+  blogPosts       BlogPost[]
+  comments        Comment[]
+  chatSessions    ChatSession[]
+  payments        Payment[]
+  tickets         Ticket[]
+  favorites       Favorite[]
+  refreshTokens   RefreshToken[]
+  moderations     Moderation[]
+  recommendations Recommendation[]
+
+  interactions Interaction[]
+  banned       Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([email])
+}
+
+model Profile {
+  id      String  @id @default(uuid())
+  userId  String  @unique
+  name    String?
+  gender  String?
+  phone   String?
+  country String?
+  avatar  String?
+  locale  String?
+  user    User    @relation(fields: [userId], references: [id])
+}
+
+// ------------------------------------------------------
+// Place/Event taxonomy
+// ------------------------------------------------------
+
+model Category {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  name      String
+  places    Place[]
+  events    Event[]
+  createdAt DateTime @default(now())
+}
+
+model Tag {
+  id    String     @id @default(uuid())
+  name  String     @unique
+  items PlaceTag[]
+}
+
+model Place {
+  id           String     @id @default(uuid())
+  name         String
+  description  String?
+  categoryId   String?
+  category     Category?  @relation(fields: [categoryId], references: [id])
+  latitude     Float
+  longitude    Float
+  address      String?
+  images       Media[]    @relation("PlaceMedia")
+  reviews      Review[]
+  events       Event[]
+  tags         PlaceTag[]
+  viewCount    Int        @default(0)
+  bookingCount Int        @default(0)
+  avgRating    Float?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([categoryId])
+}
+
+model RefreshToken {
+  id           String   @id @default(uuid())
+  tokenHash    String
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  device       String?
+  ip           String?
+  revoked      Boolean  @default(false)
+  replacedById String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Event {
+  id           String    @id @default(uuid())
+  title        String
+  description  String?
+  placeId      String?
+  place        Place?    @relation(fields: [placeId], references: [id])
+  categoryId   String?
+  category     Category? @relation(fields: [categoryId], references: [id])
+  date         DateTime
+  startTime    DateTime?
+  endTime      DateTime?
+  capacity     Int?
+  price        Float?    @default(0)
+  images       Media[]   @relation("EventMedia")
+  reviews      Review[]
+  bookingCount Int       @default(0)
+  viewCount    Int       @default(0)
+  avgRating    Float?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tickets  Ticket[]
+  bookings Booking[]
+
+  @@index([date])
+}
+
+model PlaceTag {
+  id      String @id @default(uuid())
+  placeId String
+  tagId   String
+
+  place Place @relation(fields: [placeId], references: [id])
+  tag   Tag   @relation(fields: [tagId], references: [id])
+
+  @@unique([placeId, tagId])
+}
+
+// ------------------------------------------------------
+// Media
+// ------------------------------------------------------
+
+model Media {
+  id        String    @id @default(uuid())
+  url       String
+  type      MediaType @default(IMAGE)
+  caption   String?
+  placeId   String?
+  eventId   String?
+  place     Place?    @relation("PlaceMedia", fields: [placeId], references: [id])
+  event     Event?    @relation("EventMedia", fields: [eventId], references: [id])
+  createdAt DateTime  @default(now())
+}
+
+// ------------------------------------------------------
+// Reviews & Ratings
+// ------------------------------------------------------
+
+model Review {
+  id        String       @id @default(uuid())
+  rating    Int
+  comment   String?
+  userId    String
+  placeId   String?
+  eventId   String?
+  status    ReviewStatus @default(APPROVED)
+  user      User         @relation(fields: [userId], references: [id])
+  place     Place?       @relation(fields: [placeId], references: [id])
+  event     Event?       @relation(fields: [eventId], references: [id])
+  createdAt DateTime     @default(now())
+
+  @@index([placeId])
+  @@index([eventId])
+  @@index([userId])
+}
+
+// ------------------------------------------------------
+// Bookings (reservation records) & Tickets
+// ------------------------------------------------------
+
+model Booking {
+  id            String  @id @default(uuid())
+  userId        String
+  eventId       String
+  quantity      Int     @default(1)
+  subTotal      Float
+  tax           Float   @default(0)
+  fees          Float   @default(0)
+  total         Float
+  status        String  @default("PENDING") // PENDING, CONFIRMED, CANCELLED
+  transactionId String? @unique // This links to Payment.id
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime? @updatedAt
+
+  // Relations
+  user     User      @relation(fields: [userId], references: [id])
+  event    Event     @relation(fields: [eventId], references: [id])
+  payment  Payment?  @relation(fields: [transactionId], references: [id])
+  tickets  Ticket[]
+  invoices Invoice[]
+
+  @@index([userId])
+  @@index([eventId])
+  @@index([status])
+}
+
+model Ticket {
+  id        String       @id @default(uuid())
+  bookingId String?
+  userId    String
+  eventId   String
+  qrToken   String       @unique
+  seat      String?
+  status    TicketStatus @default(PENDING)
+  issuedAt  DateTime     @default(now())
+  usedAt    DateTime?
+  expiresAt DateTime?
+  updatedAt DateTime     @updatedAt
+
+  booking   Booking? @relation(fields: [bookingId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+  event     Event    @relation(fields: [eventId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+// ------------------------------------------------------
+// Payments & Invoices
+// ------------------------------------------------------
+
+model Payment {
+  id                    String          @id @default(uuid())
+  userId                String
+  provider              PaymentProvider @default(CHAPA)
+  providerTransactionId String?
+  amount                Float
+  currency              String          @default("ETB")
+  status                PaymentStatus   @default(PENDING)
+  metadata              Json?
+  bookingId             String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  // reverse side of 1:1
+  booking Booking?
+
+  invoices Invoice[]
+}
+
+model Invoice {
+  id        String   @id @default(uuid())
+  bookingId String?
+  paymentId String?
+  number    String   @unique
+  amount    Float
+  currency  String   @default("ETB")
+  issuedAt  DateTime @default(now())
+
+  booking Booking? @relation(fields: [bookingId], references: [id])
+  payment Payment? @relation(fields: [paymentId], references: [id])
+}
+
+// ------------------------------------------------------
+// Recommendations metadata
+// ------------------------------------------------------
+
+model Recommendation {
+  id           String                 @id @default(uuid())
+  userId       String?
+  itemId       String
+  itemType     RecommendationItemType
+  score        Float
+  reason       String?
+  modelVersion String?
+  metadata     Json?
+  createdAt    DateTime               @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
+
+model Moderation {
+  id        String   @id @default(uuid())
+  adminId   String?
+  postId    String?
+  mediaId   String?
+  action    String
+  reason    String?
+  createdAt DateTime @default(now())
+
+  admin User?      @relation(fields: [adminId], references: [id])
+  post  BlogPost?  @relation(fields: [postId], references: [id])
+  media BlogMedia? @relation(fields: [mediaId], references: [id])
+}
+
+model BlogPost {
+  id          String       @id @default(uuid())
+  authorId    String
+  title       String
+  body        String
+  category    String?
+  tags        String[]
+  status      PostStatus   @default(PENDING)
+  moderations Moderation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author   User        @relation(fields: [authorId], references: [id])
+  media    BlogMedia[]
+  comments Comment[]
+}
+
+model BlogMedia {
+  id          String       @id @default(uuid())
+  postId      String
+  url         String
+  type        MediaType
+  moderations Moderation[]
+  createdAt   DateTime     @default(now())
+
+  post BlogPost @relation(fields: [postId], references: [id])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+
+  post BlogPost @relation(fields: [postId], references: [id])
+  user User     @relation(fields: [userId], references: [id])
+}
+
+// ------------------------------------------------------
+// Interactions (ML signals)
+// ------------------------------------------------------
+
+model Interaction {
+  id        String                 @id @default(uuid())
+  userId    String?
+  itemId    String
+  itemType  RecommendationItemType
+  type      InteractionType
+  context   Json?
+  createdAt DateTime               @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
+
+// ------------------------------------------------------
+// Favorites
+// ------------------------------------------------------
+
+model Favorite {
+  id        String                 @id @default(uuid())
+  userId    String
+  itemId    String
+  itemType  RecommendationItemType
+  createdAt DateTime               @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// ------------------------------------------------------
+// Chat
+// ------------------------------------------------------
+
+model ChatSession {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id])
+  messages ChatMessage[]
+}
+
+model ChatMessage {
+  id        String          @id @default(uuid())
+  sessionId String
+  role      ChatMessageRole
+  content   String
+  metadata  Json?
+  createdAt DateTime        @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id])
+}
+
+// ------------------------------------------------------
+// Audit logs
+// ------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  action     String
+  resource   String?
+  resourceId String?
+  payload    Json?
+  createdAt  DateTime @default(now())
+}
